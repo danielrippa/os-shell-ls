@@ -3,7 +3,8 @@
 
     { create-shell } = dependency 'os.win32.com.Shell'
     { each-enumeration-item } = dependency 'os.win32.com.Enumerable'
-    { first-index-of, string-interval } = dependency 'unsafe.String'
+    { first-index-of, string-interval, string-split-by-first-segment } = dependency 'unsafe.String'
+    { type } = dependency 'reflection.Type'
 
     shell = create-shell!
 
@@ -43,6 +44,7 @@
     {
       environment, user, system, volatile, process,
       expand,
-      get
+      get,
+      each-env-var
     }
 

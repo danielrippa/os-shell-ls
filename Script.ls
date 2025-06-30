@@ -4,8 +4,10 @@
     { stderr } = dependency 'os.shell.IO'
     { type } = dependency 'reflection.Type'
     { lf } = dependency 'unsafe.Constants'
-    { drop-array-items } = dependency 'unsafe.Array'
+    { drop-array-items, array-size } = dependency 'unsafe.Array'
     { name-from-path } = dependency 'os.filesystem.Path'
+    { handler-and-command-result } = dependency 'os.shell.ScriptCommands'
+    { function-execute-with-args: execute } = dependency 'unsafe.Function'
 
     WScript
 
@@ -21,23 +23,7 @@
 
     fail = (lines, errorlevel = 1) -> type '[ *:String ]' lines ; lines |> (* "#lf") |> stderr ; exit errorlevel
 
-    argv = [ (arg index) for index til argc ]
-
-    parse-argv = ->
-
-      type '[ *:String ]' it
-
-      [ command, args ] = switch it.length
-
-        | 0 => [ void, [] ]
-
-        else [ it.0, (drop-array-items it, (item, index) -> index is 0) ]
-
-      { command, args }
-
     {
       script-filepath, script-name,
-      exit, fail,
-      argc, argv,
-      parse-argv
+      exit, fail
     }

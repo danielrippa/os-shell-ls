@@ -23,7 +23,7 @@
 
       [ stdout, stderr ] = [ (tempfile.read-and-remove!) for tempfile in [ temp1, temp2 ] ]
 
-      { errorlevel, stdout, stderr }
+      { errorlevel, stdout, stderr, command-line, working-folder }
 
     {
       create-process

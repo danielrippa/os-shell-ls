@@ -9,7 +9,9 @@
 
       [ (stream-write stream-name) for stream-name in <[ StdErr StdOut ]> ]
 
-    read-stdin = (count) -> WScript.StdIn.Read count
+    read-stdin-chars = (count) -> WScript.StdIn.Read count
+
+    read-stdin = -> WScript.StdIn => loop => break if ..AtEndOfStream ; ..ReadAll!
 
     debug-writer = create-debug-writer!
 
@@ -17,6 +19,6 @@
 
     {
       stderr, stdout,
-      read-stdin,
+      read-stdin-chars, read-stdin,
       debug
     }
