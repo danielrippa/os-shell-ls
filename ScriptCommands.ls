@@ -1,113 +1,134 @@
 
   do ->
 
-    { fail, exit } = dependency 'os.shell.Script'
+    { fail, exit, script-name: actual-script-name } = dependency 'os.shell.Script'
+    { result-or-error, if-then-else } = dependency 'flow.Conditional'
+    { map-array-items: map, array-size } = dependency 'unsafe.Array'
+    { type } = dependency 'reflection.Type'
+    { is-object } = dependency 'unsafe.Object'
+    { is-function } = dependency 'unsafe.Function'
+    { value-as-string } = dependency 'reflection.Value'
+    { kebab-case, camel-case } = dependency 'unsafe.StringCase'
+    { object-member-pairs, object-member-names } = dependency 'unsafe.Object'
+    { keep-array-items: keep } = dependency 'unsafe.Array'
+    { value-type-name } = dependency 'reflection.TypeName'
+    { stdout } = dependency 'os.shell.IO'
+    { lines-as-string } = dependency 'unsafe.Text'
+    { string-starts-with-segment: starts-with } = dependency 'unsafe.String'
 
-    inject-help-commands = (commands-object, script-name) ->
+    result-as-errorlevel = (result) -> if (typeof result) is 'number' then result else 0
 
-      walk = (node, path) ->
+    result-and-error = (success, result = null, error = null) -> { success, result, error }
 
-        for key, value of node when typeof! value is 'Object'
+    success-with = -> result-and-error yes, it
+    failure-with = -> result-and-error no,, { message: it }
 
-          walk value, path ++ [ kebab-case key ]
+    # Help Injection
 
-        if typeof! node is 'Object'
+    COMMAND_NOT_RECOGNIZED = 9009
 
-          node.help = show-command-usage node, path
+    description-or-hint = (comment, index) -> switch index
 
-      #
+        | 0 => comment
+        | 1 => "  #comment"
 
-      walk commands-object, [ script-name ]
+    description-hint = ([ description, hint ]) -> { description, hint }
 
-      commands-object
+    function-description-and-hint = -> it |> function-comments |> map _ , description-or-hint |> description-hint
 
-    is-empty-comment = -> (it is '') or (it is void)
+    function-usage = (command-function, command-path) ->
 
-    as-option = -> "--#{ kebab-case it }"
+      param-names = function-parameter-names command-function
 
-    function-usage = (function-node, command-path) ->
+      usage = param-names |> map _ , -> "[#{ as-option it }]" |> -> [ "Usage: #{ command-path * ' ' } #{ it * ' ' }" ]
 
-      param-names = function-parameter-names function-node
+      { description, hint } = function-description-and-hint command-function
 
-      usage = do ->
-
-        params-usage = param-names |> map-array-items _ , -> "[#{ as-option it }]"
-
-        [ "Usage: #{ command-path * ' ' } #{ params-usage * ' ' }" ]
-
-      [ first-comment, second-comment ] = function-comments function-node
-
-      description = if is-empty-comment first-comment  then [] else [ '', first-comment ]
-      hint =        if is-empty-comment second-comment then [] else [ '', "  #second-comment" ]
-
-      options = do ->
-
-        return [] if (array-size param-names) is 0
-
-        params-options = param-names |> map-array-items _ , -> "  #{ as-option it }"
-
-        [ "Options:" ] ++ params-options
+      options = param-names |> map _ -> "  #{ as-option it }" |> -> return it if (array-size it) is 0 ; [ "Options: " ] ++ it
 
       usage ++ description ++ hint ++ options
 
-    object-usage = (object, command-path) ->
+    command-description = ([ command-name, command ]) ->
 
-      command = command-path * ' '
+      description = switch typeof command
 
-      usage = [ "Usage: #command <command> [options...]", '' ]
+        | 'function' => command |> function-description-and-hint |> (.description)
+        | 'object'   => '[sub-command...]'
 
-      subcommand-lines = (command-name, command) ->
+      "  #{ kebab-case command-name } #description"
 
-        description = do ->
+    subcommands-usage = (command) ->
 
-          command-description = switch typeof command
+      command |> object-member-pairs |> keep _ , ([name]) -> name isnt 'help' |> map _ , command-description
 
-            | 'function' =>
+    object-usage = (command, command-path) ->
 
-              comments = function-comments command
+      usage = [ "Usage: #{ command-path * ' ' } <command> [options...]", "" ]
 
-              if (array-size comments) is 0 then '' else comments.0
+      subcommands = subcommands-usage command
 
-            else
+      usage ++ [ "Available commands for #{ command-path * ' ' }:" ] ++ subcommands
 
-              '[sub-command...]'
-
-          "  #{ kebab-case command-name } #command-description"
-
-      available-subcommands = do ->
-
-        subcommands = []
-
-        for key, value of object when key isnt 'help'
-
-          subcommands +++ subcommand-lines key, value
-
-        subcommands
-
-      usage ++ [ "Available Commands for '#command':" ] ++ available-subcommands
-
-    generate-usage = (command-path-node, command-path) ->
+    command-usage = (command-path-node, command-path) ->
 
       switch typeof command-path-node
 
         | 'function' => function-usage command-path-node, command-path
         | 'object'   => object-usage   command-path-node, command-path
 
-    show-command-usage = (node, command-path) -> generate-usage node, command-path |> (* "#lf") |> stdout ; 0
+    show-command-usage = (command, command-path) ->
 
-    is-flag = ->
+      command-usage command, command-path |> lines-as-string |> stdout ; 0
 
-      return no if (typeof it) isnt 'string'
+    is-valid-command-node = (node) -> (is-object node) or (is-function node)
 
-      it `string-starts-with` '--'
+    validate-commands = (command-node, command-path) ->
+
+      unless is-valid-command-node command-node
+
+        return failure-with "Command must be either function or object, but found: #{ value-type-name command-node }"
+
+      if is-object command-node
+
+        for key, value of command-node
+
+          { success } = result = validate-commands value, command-path ++ [ kebab-case key ]
+
+          return result unless success
+
+      success-with command-node
+
+    inject-help-commands = (validation-result, script-name = actual-script-name) ->
+
+      return validation-result unless validation-result.success
+
+      { result: commands } = validation-result
+
+      walk = (node, path) !->
+
+        return if is-function node
+
+        for key, value of node when value is-object value
+
+          walk value, path ++ [ kebab-case key ]
+
+        node.help ?= -> show-command-usage node, path
+
+      walk commands, [ script-name ]
+
+      success-with commands
+
+    #
+
+    is-flag = -> return no if (typeof it) isnt 'string' ; it `starts-with` '--'
 
     isnt-a-value = -> (it is void) or (is-flag it)
 
     parse-args = (args) ->
 
-      step = ([ head, next, ...tail ]) ->
+      step = ([ head, next, ...tail ], acc) ->
 
-        return {} if head is void
+        return acc if head is void
 
         next-and-tail = [ next ] ++ tail
 
@@ -119,127 +140,120 @@
 
             match next
 
-              | isnt-a-value => step next-and-tail <<< "#key": yes
+              | isnt-a-value => acc <<< key: yes ; step next-and-tail, acc
 
-              else step tail <<< "#key": next
+              else acc <<< key: next ; step tail, acc
 
-          else
+          else step next-and-tail, acc
 
-            step next-and-tail
+      #
 
-      step args
+      step args, {}
 
-    as-command-execution = (command-path, command-fn, command-args, error-lines) ->
+    # Command Selection
 
-      { command-path, command-fn, command-args, error-lines }
+    fatal-error-message = (command-path, error-message) -> [ "Fatal error in command '#{ command-path * ' ' }'", "  #error-message" ]
 
-    execute-suggestion = (node, command-path) ->
+    execute-selected-command = ->
 
-      suggestions = object-member-names node |> map-array-items _ , kebab-case |> (* ', ')
+      type '{ success:Boolean result:Object|Null error:Object|Null }' it
 
-      error-lines: [ "Incomplete command: #{ command-path * ' ' }", "Did you mean one of: #suggestions ?" ]
+      unless it.success => fail [ it.error.message ], 9009
 
-    execute-command-node = (command-path-node, args, command-path) ->
+      { result: { command-fn, command-args, command-path } } = it
 
-      parsed-args = parse-args args
+      (-> command-fn.apply null, command-args)
 
-      params = command-path-node |> function-parameter-names |> map-array-items _ , -> parsed-args it
+      |> result-or-error |> ({ success, result, error }) ->
 
-      as-command-execution command-path-node, command-path, params
+        switch success
 
-    find-command-path-node = (argv, commands-object) ->
+          | yes => exit result-as-errorlevel result
+          | no  => fail (fatal-error-message command-path, error), 1
 
-      node = commands-object
+    is-command-path-segment = (node, arg) -> (is-object node) and not (arg `starts-with` '--')
+
+    find-command-path-node = (node, argv) ->
 
       command-path = [] ; args = []
 
       for arg, index in argv
 
-        node-name = camel-case arg
+        if is-command-path-segment node, arg
 
-        switch typeof node
+          node-name = camel-case arg
 
-          | 'object' => node[node-name] ; command-path.push arg
+          if node[node-name]?
 
-          else
+            node = node[node-name] ; command-path +++ arg
+            continue
 
-            args = argv.slice index
-            break
+        args = argv.slice index
+        break
 
       { command-path-node: node, command-path, args }
 
-    execute-help-command = (commands-object, argv, help-index, script-name) ->
+    select-command = (injection-result, argv) ->
 
-      path-to-help = argv `array-interval` [ 0, help-index ]
+      return injection-result unless injection-result.success
 
-      { command-path-node, command-path } = find-command-path-node path-to-help, commands-object
+      { result: commands } = injection-result
 
-      context-path = [ script-name ] ++ command-path
+      { command-path-node, command-path, args } = find-command-path-node commands, argv
+
+      if (array-size argv) > 0
+        if (array-size command-path) is 0
+
+          unknown-command = argv.0
+
+          available-commands = commands |> object-member-names |> map _ , kebab-case
+
+          return failure-with do
+
+            * "Unknown command: '#{ argv * ' ' }'"
+              ""
+              "Available commands are: #{ available-commands * ', ' }"
+
+            |> lines-as-string
 
       switch typeof command-path-node
 
-        | 'object'   => as-command-execution command-path-node.help, [], context-path
-        | 'function' => as-command-execution show-command-usage [ command-path-node, context-path ], context-path
+        | 'function' =>
 
-        else return error-lines: [ "Cannot show help for invalid command path: '#{ command-path * ' ' }'" ]
+          parsed-args = parse-args args ; command-args = command-path-node |> function-parameter-names |> map _ , -> parsed-args[it]
 
-    command-execution = (commands-object, script-name) ->
+          success-with { command-path, command-fn: command-path-node, command-args }
 
-      type '< Object >' commands-object ; type '< String >' script-name
+        | 'object' =>
 
-      (argv) ->
+          suggestions = command-path-node |> object-member-names |> map _ , kebab-case
 
-        type '[ *:String ]' argv
+          failure-with do
 
-        help-index = argv `array-item-index` 'help'
+            * "Incomplete command: '#{ command-path * ' ' }'"
+              "Did you mean one of: #{ suggestions * ', ' }"
 
-        return execute-help-command commands-object, argv, help-index, script-name if help-index?
+            |> lines-as-string
 
-        { command-path-node, command-path, args } = find-command-path-node argv, commands-object
+        else
 
-        switch typeof command-path-node
+          failure-with "Unknown command: '#{ argv * ' ' }'"
 
-          | 'function' => execute-command-node command-path-node, args, command-path
-          | 'object'   => execute-suggestion command-path-node, command-path
+    execute-command = (commands, argv, script-name = actual-script-name, pipeline-interceptor) ->
 
-          else error-lines: [ "Unknown command: '#{ argv * ' ' }'" ]
+      type '< Object >' commands ; type '[ *:String ]' argv
+      type '< String Undefined >' script-name ; type '< Function Undefined >' pipeline-interceptor
 
-    fatal-error-message = (command-path, error-message) ->
+      interceptor = if pipeline-interceptor isnt void then pipeline-interceptor else (-> it)
 
-      [ "Fatal error in command '#{ command-path * ' ' }':", "  #message" ]
+      commands
 
-    result-as-errorlevel = (result) -> if (typeof result) is 'number' then result else 0
-
-    default-handler = ({ command-path, command-fn, command-args, error-lines }) ->
-
-      fail error-lines, 9009 if error-lines?
-
-      try errorlevel = result-as-errorlevel command-fn.apply null, command-args
-      catch => fail (fatal-error-message command-path, e.message), 1
-
-      exit errorlevel
-
-    handler-and-command-result = (commands-object, custom-handler) ->
-
-      commands-object |> inject-help-commands script-name
-
-      execution = command-execution commands-object, script-name
-
-      command-result = execution argv
-
-      handler = if custom-handler is void then default-handler else custom-handler
-
-      { handler, command-result }
-
-    execute-command = (commands-object, custom-handler) ->
-
-      type '< Object >' commands-object ; type '< Function Undefined >' custom-handler
-
-      { handler, command-result } = handler-and-command-result commands-object, custom-handler
-
-      handler command-result, default-handler
+        |> validate-commands _ , [script-name]
+        |> inject-help-commands _ , script-name
+        |> select-command _ , argv
+        |> interceptor
+        |> execute-selected-command
 
     {
-      command-execution,
       execute-command
     }
