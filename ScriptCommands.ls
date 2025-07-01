@@ -6,7 +6,7 @@
     { map-array-items: map, array-size } = dependency 'unsafe.Array'
     { type } = dependency 'reflection.Type'
     { is-object } = dependency 'unsafe.Object'
-    { is-function } = dependency 'unsafe.Function'
+    { is-function, function-parameter-names } = dependency 'unsafe.Function'
     { value-as-string } = dependency 'reflection.Value'
     { kebab-case, camel-case } = dependency 'unsafe.StringCase'
     { object-member-pairs, object-member-names } = dependency 'unsafe.Object'
@@ -108,7 +108,7 @@
 
         return if is-function node
 
-        for key, value of node when value is-object value
+        for key, value of node when is-object value
 
           walk value, path ++ [ kebab-case key ]
 
@@ -220,7 +220,9 @@
 
         | 'function' =>
 
-          parsed-args = parse-args args ; command-args = command-path-node |> function-parameter-names |> map _ , -> parsed-args[it]
+          parsed-args = parse-args args
+
+          command-args = command-path-node |> function-parameter-names |> map _ , -> parsed-args[it]
 
           success-with { command-path, command-fn: command-path-node, command-args }
 
