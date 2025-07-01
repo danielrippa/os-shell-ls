@@ -6,7 +6,7 @@
     { map-array-items: map, array-size } = dependency 'unsafe.Array'
     { type } = dependency 'reflection.Type'
     { is-object } = dependency 'unsafe.Object'
-    { is-function, function-parameter-names } = dependency 'unsafe.Function'
+    { is-function, function-parameter-names, function-comments } = dependency 'unsafe.Function'
     { value-as-string } = dependency 'reflection.Value'
     { kebab-case, camel-case } = dependency 'unsafe.StringCase'
     { object-member-pairs, object-member-names } = dependency 'unsafe.Object'
@@ -59,7 +59,7 @@
 
     subcommands-usage = (command) ->
 
-      command |> object-member-pairs |> keep _ , ([name]) -> name isnt 'help' |> map _ , command-description
+      command |> object-member-pairs |> map _ , command-description
 
     object-usage = (command, command-path) ->
 
@@ -76,9 +76,11 @@
         | 'function' => function-usage command-path-node, command-path
         | 'object'   => object-usage   command-path-node, command-path
 
-    show-command-usage = (command, command-path) ->
+    show-command-usage = (command, command-path, args = []) ->
 
-      command-usage command, command-path |> lines-as-string |> stdout ; 0
+      { command-path-node, command-path: resolved-path } = find-command-path-node command, args
+
+      command-usage command-path-node, resolved-path |> lines-as-string |> stdout ; 0
 
     is-valid-command-node = (node) -> (is-object node) or (is-function node)
 
@@ -108,11 +110,21 @@
 
         return if is-function node
 
+        is-walking = yes
+
         for key, value of node when is-object value
 
           walk value, path ++ [ kebab-case key ]
 
-        node.help ?= -> show-command-usage node, path
+        node.help ?= (...args) ->
+
+          ``// Shows help information for this command or command group.``
+
+          unless is-walking => return
+
+          show-command-usage node, path, args
+
+          is-walking := no
 
       walk commands, [ script-name ]
 
@@ -152,7 +164,7 @@
 
     # Command Selection
 
-    fatal-error-message = (command-path, error-message) -> [ "Fatal error in command '#{ command-path * ' ' }'", "  #error-message" ]
+    fatal-error-message = (command-path, error-message) -> [ "Fatal error in command '#{ command-path * ' ' }'", "  #{ value-as-string error-message }" ]
 
     execute-selected-command = ->
 
@@ -185,11 +197,18 @@
 
           if node[node-name]?
 
-            node = node[node-name] ; command-path +++ arg
+            node = node[node-name]
+            command-path.push arg
+
             continue
 
-        args = argv.slice index
-        break
+          args = argv.slice index
+          break
+
+        else
+
+          args = argv.slice index
+          break
 
       { command-path-node: node, command-path, args }
 
